@@ -1,0 +1,22 @@
+#forest {
+  font-family: monospace;
+  font-size: 24px;
+}
+
+#forest .tree {
+  display: inline-block;
+  color: green;
+  background-color: green;
+}
+
+#forest .burning {
+  display: inline-block;
+  color: red;
+  background-color: red;
+}
+
+#forest .none {
+  display: inline-block;
+  color: brown;
+  background-color: brown;
+}
