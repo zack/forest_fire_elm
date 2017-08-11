@@ -1,6 +1,11 @@
+.content {
+  margin: 0 auto;
+  width: 800px;
+}
+
 #forest {
   font-family: monospace;
-  font-size: 24px;
+  font-size: 8px;
 }
 
 #forest .tree {
@@ -19,4 +24,8 @@
   display: inline-block;
   color: brown;
   background-color: brown;
+}
+
+svg {
+  border: 1px solid black;
 }
