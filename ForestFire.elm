@@ -1,28 +1,32 @@
 module ForestFire exposing (..)
 
 import Array exposing (..)
+import Dict exposing (..)
 import Html exposing (..)
 import Html.Attributes exposing (class, id)
+import Html.Events exposing (onClick)
 import Random exposing (Generator, maxInt, minInt)
-import Time exposing (Time, millisecond)
+import Set exposing (..)
 import Svg exposing (svg, rect)
 import Svg.Attributes exposing (version, viewBox, width, fill, x, y, height)
+import Time exposing (Time, millisecond)
 
 
 type alias Model =
     { forest : Forest
     , running : Bool
     , seed : Random.Seed
+    , clock : Int
     , speed : Float
     , size : Int
     , burnRate : Float
     , growthRate : Float
-    , probabilities : List (List Float)
+    , probabilities : List Float
     }
 
 
 type alias Forest =
-    List (List Tree)
+    List Tree
 
 
 type Tree
@@ -35,6 +39,8 @@ type Msg
     = InitForest Forest
     | SetSeed Int
     | IncrementForest Time
+    | ToggleRunning
+    | Restart
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -49,13 +55,12 @@ update msg model =
                     | forest = forest
                     , probabilities = probabilities
                     , seed = seed
-                    , running = True
                   }
                 , Random.generate SetSeed (Random.int maxInt minInt)
                 )
 
             SetSeed seed ->
-                ( { model | seed = Random.initialSeed seed, running = True }, Cmd.none )
+                ( { model | seed = Random.initialSeed seed }, Cmd.none )
 
             IncrementForest _ ->
                 if model.running then
@@ -63,78 +68,92 @@ update msg model =
                         | forest = incrementForest model
                         , probabilities = probabilities
                         , seed = seed
+                        , clock = model.clock + 1
                       }
                     , Cmd.none
                     )
                 else
                     ( model, Cmd.none )
 
+            ToggleRunning ->
+                ( { model | running = (not model.running) }, Cmd.none )
+
+            Restart ->
+                ( { initModel | running = model.running }
+                , Random.generate InitForest (forestGenerator initModel)
+                )
+
 
 incrementForest : Model -> Forest
 incrementForest model =
     let
-        arrForest : Array (Array Tree)
-        arrForest =
-            Array.fromList (List.map Array.fromList model.forest)
-
-        arrProbabilities : Array (Array Float)
+        arrProbabilities : Array Float
         arrProbabilities =
-            Array.fromList (List.map Array.fromList model.probabilities)
+            Array.fromList model.probabilities
 
-        transformTree : Int -> Int -> Tree -> Tree
-        transformTree row_idx col_idx tree =
+        getNeighbors : Int -> List Int
+        getNeighbors idx =
+            [ idx - 1
+            , idx + 1
+            , idx - model.size
+            , idx - model.size - 1
+            , idx - model.size + 1
+            , idx + model.size
+            , idx + model.size - 1
+            , idx + model.size + 1
+            ]
+                |> List.filter (\idx -> idx >= 0 && idx < (model.size * model.size))
+
+        ignitingTrees : Forest -> Set Int
+        ignitingTrees forest =
+            forest
+                |> List.indexedMap
+                    (\idx tree ->
+                        if tree == Burning then
+                            (getNeighbors idx)
+                        else
+                            []
+                    )
+                |> List.concat
+                |> Set.fromList
+
+        transformTree : Set Int -> Int -> Tree -> Tree
+        transformTree igniting idx tree =
             case tree of
                 Living ->
-                    let
-                        probability =
-                            case Array.get row_idx arrProbabilities of
-                                Just row ->
-                                    Array.get col_idx row
-
-                                Nothing ->
-                                    Nothing
-                    in
-                        case probability of
-                            Just value ->
-                                if value < model.burnRate then
-                                    Burning
-                                else
-                                    Living
-
-                            Nothing ->
-                                Dead
+                    if Set.member idx igniting then
+                        Burning
+                    else
+                        let
+                            prob =
+                                Maybe.withDefault 0 (Array.get idx arrProbabilities)
+                        in
+                            if prob < model.burnRate then
+                                Burning
+                            else
+                                Living
 
                 Burning ->
                     Dead
 
                 Dead ->
                     let
-                        probability =
-                            case Array.get row_idx arrProbabilities of
-                                Just row ->
-                                    Array.get col_idx row
-
-                                Nothing ->
-                                    Nothing
+                        prob =
+                            Maybe.withDefault 0 (Array.get idx arrProbabilities)
                     in
-                        case probability of
-                            Just value ->
-                                if value < model.growthRate then
-                                    Living
-                                else
-                                    Dead
-
-                            Nothing ->
-                                Dead
-
-        transformRow : Int -> Array Tree -> List Tree
-        transformRow row_idx row =
-            Array.toList (Array.indexedMap (transformTree row_idx) row)
+                        if prob < model.growthRate then
+                            Living
+                        else
+                            Dead
     in
-        Array.toList (Array.indexedMap transformRow arrForest)
+        let
+            igniting =
+                ignitingTrees model.forest
+        in
+            List.indexedMap (transformTree igniting) model.forest
 
 
-getNewProbabilities : Model -> ( List (List Float), Random.Seed )
+getNewProbabilities : Model -> ( List Float, Random.Seed )
 getNewProbabilities model =
     Random.step (probabilityGenerator model) model.seed
 
@@ -166,22 +185,29 @@ view model =
         deadTree x y =
             tree x y "#1A58A3"
 
-        drawTree x y type_ =
-            case type_ of
-                Living ->
-                    livingTree x y
+        drawTree idx type_ =
+            let
+                y =
+                    idx // model.size
 
-                Burning ->
-                    burningTree x y
+                x =
+                    idx % model.size
+            in
+                case type_ of
+                    Living ->
+                        livingTree x y
 
-                Dead ->
-                    deadTree x y
+                    Burning ->
+                        burningTree x y
 
-        drawRow y row =
-            List.indexedMap (drawTree y) row
+                    Dead ->
+                        deadTree x y
     in
         div [ class "content" ]
-            [ h1 [] [ text "Forest Fire" ]
+            [ h1 [] [ text ("Forest Fire (" ++ (toString model.clock) ++ ")") ]
+            , toggleButton model
+            , restartButton
+            , div [] [ text (toString model.seed) ]
             , div []
                 [ svg
                     [ version "1.1"
@@ -189,9 +215,26 @@ view model =
                     , height "800"
                     , viewBox ("0 0 " ++ (toString model.size) ++ " " ++ (toString model.size))
                     ]
-                    (List.concat (List.indexedMap drawRow model.forest))
+                    (List.indexedMap drawTree model.forest)
                 ]
             ]
+
+
+toggleButton : Model -> Html Msg
+toggleButton model =
+    let
+        label =
+            if model.running then
+                "Pause"
+            else
+                "Start"
+    in
+        button [ onClick ToggleRunning ] [ text label ]
+
+
+restartButton : Html Msg
+restartButton =
+    button [ onClick Restart ] [ text "Restart" ]
 
 
 forestGenerator : Model -> Generator Forest
@@ -208,23 +251,28 @@ forestGenerator model =
         treeGenerator =
             Random.map intToTree (Random.int 0 1)
     in
-        Random.list model.size (Random.list model.size treeGenerator)
+        Random.list (model.size * model.size) treeGenerator
 
 
-probabilityGenerator : Model -> Generator (List (List Float))
+probabilityGenerator : Model -> Generator (List Float)
 probabilityGenerator model =
-    Random.list model.size (Random.list model.size (Random.float 0 1))
+    Random.list (model.size * model.size) (Random.float 0 1)
+
+
+
+-- Good starting parameters are size: 100, burnRate: 0.00001, growthRate: 0.01
 
 
 initModel : Model
 initModel =
     { forest = []
-    , running = False
+    , running = True
     , seed = Random.initialSeed 0
-    , speed = 10
-    , size = 100
-    , burnRate = 0.01
-    , growthRate = 0.5
+    , speed = 1
+    , clock = 0
+    , size = 80
+    , burnRate = 0.00001
+    , growthRate = 0.01
     , probabilities = []
     }
 
