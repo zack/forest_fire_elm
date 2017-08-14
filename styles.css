@@ -5,9 +5,7 @@
 
 #forest {
   font-family: monospace;
-  font-size: 8px;
-}
-
+  font-size: 8px; }
 #forest .tree {
   display: inline-block;
   color: green;
