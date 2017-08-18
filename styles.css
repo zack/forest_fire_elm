@@ -3,27 +3,38 @@
   width: 800px;
 }
 
-#forest {
-  font-family: monospace;
-  font-size: 8px; }
-#forest .tree {
-  display: inline-block;
-  color: green;
-  background-color: green;
-}
-
-#forest .burning {
-  display: inline-block;
-  color: red;
-  background-color: red;
-}
-
-#forest .none {
-  display: inline-block;
-  color: brown;
-  background-color: brown;
-}
-
 svg {
   border: 1px solid black;
+}
+
+.filters {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.filter-slider {
+  display: flex;
+}
+
+.filter-slider label {
+  display: inline-block;
+  padding-top: 5px;
+}
+
+.filter-slider label.name {
+  width: 125px;
+}
+
+.filter-slider label.val {
+  width: 50px;
+}
+
+.filters paper-slider {
+  flex-grow: 1;
+}
+
+.filters input {
+  flex-grow: 1;
+  margin: 5px 20px;
 }

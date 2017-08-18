@@ -3,8 +3,9 @@ module ForestFire exposing (..)
 import AnimationFrame exposing (..)
 import Debug exposing (log)
 import Html exposing (..)
-import Html.Attributes exposing (class, id)
-import Html.Events exposing (onClick)
+import Html.Attributes as Attr exposing (class, id)
+import Html.Events exposing (onClick, on)
+import Json.Decode exposing (string, int, list, Decoder, at)
 import Random exposing (Generator, Seed, maxInt, minInt)
 import Set exposing (..)
 import Svg exposing (svg, rect)
@@ -20,8 +21,9 @@ type alias Model =
     , size : Int
     , burnRate : Float
     , growthRate : Float
-    , animationSpeed : Float
-    , timeSinceDraw : Float
+    , speed : Int
+    , lastDrawTime : Int
+    , actualFramerate : Float
     }
 
 
@@ -44,6 +46,9 @@ type Msg
     | IncrementForest Time
     | ToggleRunning
     | Restart
+    | SetSpeed Int
+    | SetGrowth Int
+    | SetBurn Int
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -55,27 +60,49 @@ update msg model =
             )
 
         IncrementForest msg ->
-            if model.timeSinceDraw < model.animationSpeed then
-                ( { model | timeSinceDraw = (model.timeSinceDraw + (Time.inMilliseconds msg)) }, Cmd.none )
-            else
-                let
-                    ( newSeed, newForest ) =
-                        incrementForest model
+            let
+                time =
+                    round (inMilliseconds msg)
 
-                    a =
-                        log "msg time" (toString msg)
-                in
-                    if model.running then
-                        ( { model
-                            | forest = newForest
-                            , seed = newSeed
-                            , clock = model.clock + 1
-                            , timeSinceDraw = 0
-                          }
-                        , Cmd.none
-                        )
-                    else
-                        ( model, Cmd.none )
+                actualFramerate =
+                    (1000 / (toFloat (time - model.lastDrawTime)))
+                        |> (*) 10
+                        |> round
+                        |> toFloat
+                        |> (flip (/)) 10
+            in
+                if (time - model.lastDrawTime) < model.speed then
+                    ( model, Cmd.none )
+                else
+                    let
+                        ( newSeed, newForest ) =
+                            incrementForest model
+                    in
+                        if model.running then
+                            ( { model
+                                | forest = newForest
+                                , seed = newSeed
+                                , clock = model.clock + 1
+                                , lastDrawTime = time
+                                , actualFramerate = actualFramerate
+                              }
+                            , Cmd.none
+                            )
+                        else
+                            ( model, Cmd.none )
+
+        SetSpeed sliderVal ->
+            let
+                newSpeed =
+                    floor (clamp 0 1000 (1.05 ^ (toFloat sliderVal) * 10 + 20))
+            in
+                ( { model | speed = newSpeed }, Cmd.none )
+
+        SetGrowth sliderVal ->
+            ( { model | growthRate = ((toFloat sliderVal) / 1000) }, Cmd.none )
+
+        SetBurn sliderVal ->
+            ( { model | burnRate = ((toFloat sliderVal) / 100000) }, Cmd.none )
 
         ToggleRunning ->
             ( { model | running = (not model.running) }, Cmd.none )
@@ -144,7 +171,7 @@ incrementForest model =
                 |> List.concat
                 |> Set.fromList
 
-        reductionFunction : Tree -> ( Seed, Int, List Tree ) -> ( Seed, Int, List Tree )
+        reductionFunction : Tree -> ( Seed, Int, Forest ) -> ( Seed, Int, Forest )
         reductionFunction tree ( seed, idx, forestSoFar ) =
             case tree of
                 Burning ->
@@ -167,11 +194,14 @@ incrementForest model =
                     let
                         ( randFloat, newSeed ) =
                             Random.step (Random.float 0 1) seed
+
+                        newTree =
+                            if randFloat < model.burnRate || (Set.member idx burningNeighbors) then
+                                Burning
+                            else
+                                Living
                     in
-                        if randFloat < model.burnRate || (Set.member idx burningNeighbors) then
-                            ( newSeed, idx + 1, Burning :: forestSoFar )
-                        else
-                            ( newSeed, idx + 1, Living :: forestSoFar )
+                        ( newSeed, idx + 1, newTree :: forestSoFar )
 
         burningNeighbors =
             ignitingTrees model.forest
@@ -184,11 +214,69 @@ incrementForest model =
 
 subscriptions : Model -> Sub Msg
 subscriptions model =
-    AnimationFrame.diffs IncrementForest
+    AnimationFrame.times IncrementForest
 
 
 view : Model -> Html Msg
 view model =
+    div [ class "content" ]
+        [ h1 [] [ text ("Forest Fire (" ++ (toString model.clock) ++ ")") ]
+        , div [ class "filters" ]
+            [ speedSlider model.speed model.actualFramerate
+            , growthSlider model.growthRate
+            , burnSlider model.burnRate
+            ]
+        , toggleButton model
+        , button [ onClick Restart ] [ text "Restart" ]
+        , forestSvg model
+        ]
+
+
+toggleButton : Model -> Html Msg
+toggleButton model =
+    let
+        label =
+            if model.running then
+                "Pause"
+            else
+                "Start"
+    in
+        button [ onClick ToggleRunning ] [ text label ]
+
+
+speedSlider : Int -> Float -> Html Msg
+speedSlider speed actualFramerate =
+    let
+        frameRate =
+            1000 // speed
+    in
+        div [ class "filter-slider" ]
+            [ label [ class "name" ] [ text "Framerate" ]
+            , paperSlider [ Attr.max "95", onImmediateValueChange SetSpeed ] []
+            , label [ class "val" ] [ text ((toString frameRate) ++ "(" ++ (toString actualFramerate) ++ ")") ]
+            ]
+
+
+growthSlider : Float -> Html Msg
+growthSlider speed =
+    div [ class "filter-slider" ]
+        [ label [ class "name" ] [ text "Growth Rate" ]
+        , paperSlider [ Attr.max "1000", onImmediateValueChange SetGrowth ] []
+        , label [ class "val" ] [ text (toString speed) ]
+        ]
+
+
+burnSlider : Float -> Html Msg
+burnSlider speed =
+    div [ class "filter-slider" ]
+        [ label [ class "name" ] [ text "Burn Rate" ]
+        , paperSlider [ Attr.max "1000", onImmediateValueChange SetBurn ] []
+        , label [ class "val" ] [ text (toString speed) ]
+        ]
+
+
+forestSvg : Model -> Html Msg
+forestSvg model =
     let
         tree xc yc color =
             rect
@@ -224,48 +312,23 @@ view model =
                     Dead ->
                         Svg.text ""
     in
-        div [ class "content" ]
-            [ h1 [] [ text ("Forest Fire (" ++ (toString model.clock) ++ ")") ]
-            , toggleButton model
-            , restartButton
-            , div [] [ text (toString model.seed) ]
-            , div []
-                [ svg
-                    [ version "1.1"
-                    , width "800"
-                    , height "800"
-                    , viewBox ("0 0 " ++ (toString model.size) ++ " " ++ (toString model.size))
-                    ]
-                    ((rect
-                        [ fill "#1A58A3"
-                        , x "0"
-                        , y "0"
-                        , width (toString model.size)
-                        , height (toString model.size)
-                        ]
-                        []
-                     )
-                        :: (List.indexedMap drawTree model.forest)
-                    )
-                ]
+        svg
+            [ version "1.1"
+            , width "800"
+            , height "800"
+            , viewBox ("0 0 " ++ (toString model.size) ++ " " ++ (toString model.size))
             ]
-
-
-toggleButton : Model -> Html Msg
-toggleButton model =
-    let
-        label =
-            if model.running then
-                "Pause"
-            else
-                "Start"
-    in
-        button [ onClick ToggleRunning ] [ text label ]
-
-
-restartButton : Html Msg
-restartButton =
-    button [ onClick Restart ] [ text "Restart" ]
+            ((rect
+                [ fill "#1A58A3"
+                , x "0"
+                , y "0"
+                , width (toString model.size)
+                , height (toString model.size)
+                ]
+                []
+             )
+                :: (List.indexedMap drawTree model.forest)
+            )
 
 
 forestGenerator : Int -> Generator Forest
@@ -295,11 +358,12 @@ initModel seed =
     , running = True
     , seed = seed
     , clock = 0
-    , size = 100
+    , size = 40
     , burnRate = 0.0001
     , growthRate = 0.01
-    , animationSpeed = 1.0
-    , timeSinceDraw = 0.0
+    , speed = 30
+    , lastDrawTime = 0
+    , actualFramerate = 0
     }
 
 
@@ -322,3 +386,15 @@ main =
         , update = update
         , subscriptions = subscriptions
         }
+
+
+paperSlider : List (Attribute msg) -> List (Html msg) -> Html msg
+paperSlider =
+    node "paper-slider"
+
+
+onImmediateValueChange : (Int -> msg) -> Attribute msg
+onImmediateValueChange toMsg =
+    at [ "target", "immediateValue" ] int
+        |> Json.Decode.map toMsg
+        |> on "immediate-value-changed"
