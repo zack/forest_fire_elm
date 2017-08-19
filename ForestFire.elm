@@ -8,7 +8,8 @@ import Html.Events exposing (onClick, on)
 import Json.Decode exposing (string, int, list, Decoder, at)
 import Random exposing (Generator, Seed, maxInt, minInt)
 import Set exposing (..)
-import Svg exposing (svg, rect)
+import Svg exposing (rect)
+import Svg.Keyed
 import Svg.Attributes exposing (version, viewBox, width, fill, x, y, height)
 import Time exposing (..)
 
@@ -42,8 +43,7 @@ type Tree
 
 
 type Msg
-    = InitForest Forest
-    | IncrementForest Time
+    = IncrementForest Time
     | ToggleRunning
     | Restart
     | SetSpeed Int
@@ -54,11 +54,6 @@ type Msg
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        InitForest forest ->
-            ( { model | forest = forest }
-            , Cmd.none
-            )
-
         IncrementForest msg ->
             let
                 time =
@@ -108,13 +103,7 @@ update msg model =
             ( { model | running = (not model.running) }, Cmd.none )
 
         Restart ->
-            let
-                m =
-                    initModel model.seed
-            in
-                ( { m | running = model.running }
-                , Random.generate InitForest (forestGenerator model.size)
-                )
+            ( initModel model.seed, Cmd.none )
 
 
 incrementForest : Model -> ( Random.Seed, Forest )
@@ -279,7 +268,7 @@ forestSvg : Model -> Html Msg
 forestSvg model =
     let
         tree xc yc color =
-            rect
+            Svg.Keyed.node "rect"
                 [ fill color
                 , x (toString xc)
                 , y (toString yc)
@@ -294,6 +283,10 @@ forestSvg model =
         livingTree x y =
             tree x y "#0EA27D"
 
+        deadTree x y =
+            Svg.text ""
+
+        -- tree x y "#1A58A3"
         drawTree idx type_ =
             let
                 y =
@@ -301,24 +294,23 @@ forestSvg model =
 
                 x =
                     idx % model.size
+
+                key =
+                    "(" ++ (toString x) ++ "," ++ (toString y) ++ ")"
             in
                 case type_ of
                     Living ->
-                        livingTree x y
+                        ( key, livingTree x y )
 
                     Burning ->
-                        burningTree x y
+                        ( key, burningTree x y )
 
                     Dead ->
-                        Svg.text ""
-    in
-        svg
-            [ version "1.1"
-            , width "800"
-            , height "800"
-            , viewBox ("0 0 " ++ (toString model.size) ++ " " ++ (toString model.size))
-            ]
-            ((rect
+                        ( key, deadTree x y )
+
+        background =
+            ( "-1"
+            , (Svg.Keyed.node "rect"
                 [ fill "#1A58A3"
                 , x "0"
                 , y "0"
@@ -326,9 +318,16 @@ forestSvg model =
                 , height (toString model.size)
                 ]
                 []
-             )
-                :: (List.indexedMap drawTree model.forest)
+              )
             )
+    in
+        Svg.Keyed.node "svg"
+            [ version "1.1"
+            , width "800"
+            , height "800"
+            , viewBox ("0 0 " ++ (toString model.size) ++ " " ++ (toString model.size))
+            ]
+            (background :: (List.indexedMap drawTree model.forest))
 
 
 forestGenerator : Int -> Generator Forest
@@ -354,28 +353,38 @@ forestGenerator size =
 
 initModel : Seed -> Model
 initModel seed =
-    { forest = []
-    , running = True
-    , seed = seed
-    , clock = 0
-    , size = 40
-    , burnRate = 0.0001
-    , growthRate = 0.01
-    , speed = 30
-    , lastDrawTime = 0
-    , actualFramerate = 0
-    }
+    let
+        initBurnRate =
+            0.0001
+
+        initGrowthRate =
+            0.01
+
+        initSize =
+            100
+
+        initSpeed =
+            30
+
+        ( initForest, initSeed ) =
+            Random.step (forestGenerator initSize) seed
+    in
+        { forest = initForest
+        , running = True
+        , seed = initSeed
+        , clock = 0
+        , size = initSize
+        , burnRate = initBurnRate
+        , growthRate = initGrowthRate
+        , speed = initSpeed
+        , lastDrawTime = 0
+        , actualFramerate = 0
+        }
 
 
 init : Flags -> ( Model, Cmd Msg )
 init flags =
-    let
-        model =
-            initModel (Random.initialSeed flags.randomSeed)
-    in
-        ( model
-        , Random.generate InitForest (forestGenerator model.size)
-        )
+    ( initModel (Random.initialSeed flags.randomSeed), Cmd.none )
 
 
 main : Program Flags Model Msg
