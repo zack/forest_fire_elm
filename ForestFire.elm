@@ -24,7 +24,7 @@ type alias Model =
     , growthRate : Float
     , speed : Int
     , lastDrawTime : Int
-    , actualFramerate : Float
+    , framerate : Float
     }
 
 
@@ -56,17 +56,10 @@ update msg model =
     case msg of
         IncrementForest msg ->
             let
-                time =
-                    round (inMilliseconds msg)
-
-                actualFramerate =
-                    (1000 / (toFloat (time - model.lastDrawTime)))
-                        |> (*) 10
-                        |> round
-                        |> toFloat
-                        |> (flip (/)) 10
+                currentTime =
+                    (round (inMilliseconds msg))
             in
-                if (time - model.lastDrawTime) < model.speed then
+                if (currentTime - model.lastDrawTime) < model.speed then
                     ( model, Cmd.none )
                 else
                     let
@@ -78,8 +71,8 @@ update msg model =
                                 | forest = newForest
                                 , seed = newSeed
                                 , clock = model.clock + 1
-                                , lastDrawTime = time
-                                , actualFramerate = actualFramerate
+                                , lastDrawTime = currentTime
+                                , framerate = calcFramerate model.lastDrawTime currentTime
                               }
                             , Cmd.none
                             )
@@ -211,7 +204,7 @@ view model =
     div [ class "content" ]
         [ h1 [] [ text ("Forest Fire (" ++ (toString model.clock) ++ ")") ]
         , div [ class "filters" ]
-            [ speedSlider model.speed model.actualFramerate
+            [ speedSlider model.speed model.framerate
             , growthSlider model.growthRate
             , burnSlider model.burnRate
             ]
@@ -234,7 +227,7 @@ toggleButton model =
 
 
 speedSlider : Int -> Float -> Html Msg
-speedSlider speed actualFramerate =
+speedSlider speed framerate =
     let
         frameRate =
             1000 // speed
@@ -242,7 +235,7 @@ speedSlider speed actualFramerate =
         div [ class "filter-slider" ]
             [ label [ class "name" ] [ text "Framerate" ]
             , paperSlider [ Attr.max "95", onImmediateValueChange SetSpeed ] []
-            , label [ class "val" ] [ text ((toString frameRate) ++ "(" ++ (toString actualFramerate) ++ ")") ]
+            , label [ class "val" ] [ text ((toString frameRate) ++ "(" ++ (toString framerate) ++ ")") ]
             ]
 
 
@@ -378,7 +371,7 @@ initModel seed =
         , growthRate = initGrowthRate
         , speed = initSpeed
         , lastDrawTime = 0
-        , actualFramerate = 0
+        , framerate = 0
         }
 
 
@@ -407,3 +400,12 @@ onImmediateValueChange toMsg =
     at [ "target", "immediateValue" ] int
         |> Json.Decode.map toMsg
         |> on "immediate-value-changed"
+
+
+calcFramerate : Int -> Int -> Float
+calcFramerate lastDrawTime currentTime =
+    (1000 / (toFloat (currentTime - lastDrawTime)))
+        |> (*) 10
+        |> round
+        |> toFloat
+        |> (flip (/)) 10
