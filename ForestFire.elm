@@ -404,8 +404,9 @@ onImmediateValueChange toMsg =
 
 calcFramerate : Int -> Int -> Float
 calcFramerate lastDrawTime currentTime =
-    (1000 / (toFloat (currentTime - lastDrawTime)))
-        |> (*) 10
+    (currentTime - lastDrawTime)
+        |> toFloat
+        |> (/) 10000
         |> round
         |> toFloat
         |> (flip (/)) 10
