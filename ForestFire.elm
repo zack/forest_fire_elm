@@ -1,27 +1,18 @@
 module ForestFire exposing (..)
 
 import AnimationFrame exposing (..)
-import Debug exposing (log)
+import Forest exposing (Forest, new, step, svg)
 import Html exposing (..)
 import Html.Attributes as Attr exposing (class, id)
 import Html.Events exposing (onClick, on)
 import Json.Decode exposing (string, int, list, Decoder, at)
-import Random exposing (Generator, Seed, maxInt, minInt)
-import Set exposing (..)
-import Svg exposing (rect)
-import Svg.Keyed
-import Svg.Attributes exposing (version, viewBox, width, fill, x, y, height)
 import Time exposing (..)
 
 
 type alias Model =
     { forest : Forest
     , running : Bool
-    , seed : Seed
     , clock : Int
-    , size : Int
-    , burnRate : Float
-    , growthRate : Float
     , speed : Int
     , lastDrawTime : Int
     , framerate : Float
@@ -29,26 +20,14 @@ type alias Model =
 
 
 type alias Flags =
-    { randomSeed : Int }
-
-
-type alias Forest =
-    List Tree
-
-
-type Tree
-    = Living
-    | Burning
-    | Dead
+    { randomInt : Int }
 
 
 type Msg
     = IncrementForest Time
     | ToggleRunning
-    | Restart
+      -- | Restart
     | SetSpeed Int
-    | SetGrowth Int
-    | SetBurn Int
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -61,23 +40,17 @@ update msg model =
             in
                 if (currentTime - model.lastDrawTime) < model.speed then
                     ( model, Cmd.none )
+                else if model.running then
+                    ( { model
+                        | forest = Forest.step model.forest
+                        , clock = model.clock + 1
+                        , lastDrawTime = currentTime
+                        , framerate = calcFramerate model.lastDrawTime currentTime
+                      }
+                    , Cmd.none
+                    )
                 else
-                    let
-                        ( newSeed, newForest ) =
-                            incrementForest model
-                    in
-                        if model.running then
-                            ( { model
-                                | forest = newForest
-                                , seed = newSeed
-                                , clock = model.clock + 1
-                                , lastDrawTime = currentTime
-                                , framerate = calcFramerate model.lastDrawTime currentTime
-                              }
-                            , Cmd.none
-                            )
-                        else
-                            ( model, Cmd.none )
+                    ( model, Cmd.none )
 
         SetSpeed sliderVal ->
             let
@@ -86,112 +59,13 @@ update msg model =
             in
                 ( { model | speed = newSpeed }, Cmd.none )
 
-        SetGrowth sliderVal ->
-            ( { model | growthRate = ((toFloat sliderVal) / 1000) }, Cmd.none )
-
-        SetBurn sliderVal ->
-            ( { model | burnRate = ((toFloat sliderVal) / 100000) }, Cmd.none )
-
         ToggleRunning ->
             ( { model | running = (not model.running) }, Cmd.none )
 
-        Restart ->
-            ( initModel model.seed, Cmd.none )
 
 
-incrementForest : Model -> ( Random.Seed, Forest )
-incrementForest model =
-    let
-        getNeighbors : Int -> List Int
-        getNeighbors idx =
-            let
-                leftBorder =
-                    idx % model.size == 0
-
-                rightBorder =
-                    (idx + 1) % model.size == 0
-            in
-                [ if leftBorder then
-                    -1
-                  else
-                    idx - 1
-                , if rightBorder then
-                    -1
-                  else
-                    idx + 1
-                , idx - model.size
-                , if leftBorder then
-                    -1
-                  else
-                    idx - model.size - 1
-                , if rightBorder then
-                    -1
-                  else
-                    idx - model.size + 1
-                , idx + model.size
-                , if leftBorder then
-                    -1
-                  else
-                    idx + model.size - 1
-                , if rightBorder then
-                    -1
-                  else
-                    idx + model.size + 1
-                ]
-                    |> List.filter (\idx -> idx >= 0 && idx < (model.size * model.size))
-
-        ignitingTrees : Forest -> Set Int
-        ignitingTrees forest =
-            forest
-                |> List.indexedMap
-                    (\idx tree ->
-                        if tree == Burning then
-                            (getNeighbors idx)
-                        else
-                            []
-                    )
-                |> List.concat
-                |> Set.fromList
-
-        reductionFunction : Tree -> ( Seed, Int, Forest ) -> ( Seed, Int, Forest )
-        reductionFunction tree ( seed, idx, forestSoFar ) =
-            case tree of
-                Burning ->
-                    ( seed, idx + 1, Dead :: forestSoFar )
-
-                Dead ->
-                    let
-                        ( randFloat, newSeed ) =
-                            Random.step (Random.float 0 1) seed
-
-                        newTree =
-                            if randFloat < model.growthRate then
-                                Living
-                            else
-                                Dead
-                    in
-                        ( newSeed, idx + 1, newTree :: forestSoFar )
-
-                Living ->
-                    let
-                        ( randFloat, newSeed ) =
-                            Random.step (Random.float 0 1) seed
-
-                        newTree =
-                            if randFloat < model.burnRate || (Set.member idx burningNeighbors) then
-                                Burning
-                            else
-                                Living
-                    in
-                        ( newSeed, idx + 1, newTree :: forestSoFar )
-
-        burningNeighbors =
-            ignitingTrees model.forest
-
-        ( newSeed, _, newForest ) =
-            List.foldl reductionFunction ( model.seed, 0, [] ) model.forest
-    in
-        ( newSeed, (List.reverse newForest) )
+-- Restart ->
+-- ( initModel, Cmd.none )
 
 
 subscriptions : Model -> Sub Msg
@@ -204,13 +78,11 @@ view model =
     div [ class "content" ]
         [ h1 [] [ text ("Forest Fire (" ++ (toString model.clock) ++ ")") ]
         , div [ class "filters" ]
-            [ speedSlider model.speed model.framerate
-            , growthSlider model.growthRate
-            , burnSlider model.burnRate
-            ]
+            [ speedSlider model.speed model.framerate ]
         , toggleButton model
-        , button [ onClick Restart ] [ text "Restart" ]
-        , forestSvg model
+
+        -- , button [ onClick Restart ] [ text "Restart" ]
+        , Forest.svg model.forest
         ]
 
 
@@ -239,137 +111,32 @@ speedSlider speed framerate =
             ]
 
 
-growthSlider : Float -> Html Msg
-growthSlider speed =
-    div [ class "filter-slider" ]
-        [ label [ class "name" ] [ text "Growth Rate" ]
-        , paperSlider [ Attr.max "1000", onImmediateValueChange SetGrowth ] []
-        , label [ class "val" ] [ text (toString speed) ]
-        ]
+
+-- Good starting parameters are edgeLength: 100, burnRate: 0.00001, growthRate: 0.01
 
 
-burnSlider : Float -> Html Msg
-burnSlider speed =
-    div [ class "filter-slider" ]
-        [ label [ class "name" ] [ text "Burn Rate" ]
-        , paperSlider [ Attr.max "1000", onImmediateValueChange SetBurn ] []
-        , label [ class "val" ] [ text (toString speed) ]
-        ]
-
-
-forestSvg : Model -> Html Msg
-forestSvg model =
+initModel : Int -> Model
+initModel randomInt =
     let
-        tree xc yc color =
-            Svg.Keyed.node "rect"
-                [ fill color
-                , x (toString xc)
-                , y (toString yc)
-                , width "1"
-                , height "1"
-                ]
-                []
-
-        burningTree x y =
-            tree x y "#F98A15"
-
-        livingTree x y =
-            tree x y "#0EA27D"
-
-        deadTree x y =
-            Svg.text ""
-
-        -- tree x y "#1A58A3"
-        drawTree idx type_ =
-            let
-                y =
-                    idx // model.size
-
-                x =
-                    idx % model.size
-
-                key =
-                    "(" ++ (toString x) ++ "," ++ (toString y) ++ ")"
-            in
-                case type_ of
-                    Living ->
-                        ( key, livingTree x y )
-
-                    Burning ->
-                        ( key, burningTree x y )
-
-                    Dead ->
-                        ( key, deadTree x y )
-
-        background =
-            ( "-1"
-            , (Svg.Keyed.node "rect"
-                [ fill "#1A58A3"
-                , x "0"
-                , y "0"
-                , width (toString model.size)
-                , height (toString model.size)
-                ]
-                []
-              )
-            )
-    in
-        Svg.Keyed.node "svg"
-            [ version "1.1"
-            , width "800"
-            , height "800"
-            , viewBox ("0 0 " ++ (toString model.size) ++ " " ++ (toString model.size))
-            ]
-            (background :: (List.indexedMap drawTree model.forest))
-
-
-forestGenerator : Int -> Generator Forest
-forestGenerator size =
-    let
-        intToTree : Int -> Tree
-        intToTree val =
-            if val == 1 then
-                Living
-            else
-                Dead
-
-        treeGenerator : Generator Tree
-        treeGenerator =
-            Random.map intToTree (Random.int 0 1)
-    in
-        Random.list (size * size) treeGenerator
-
-
-
--- Good starting parameters are size: 100, burnRate: 0.00001, growthRate: 0.01
-
-
-initModel : Seed -> Model
-initModel seed =
-    let
-        initBurnRate =
+        burnRate =
             0.0001
 
-        initGrowthRate =
+        growthRate =
             0.01
 
-        initSize =
+        edgeLength =
             100
 
-        initSpeed =
+        speed =
             30
 
-        ( initForest, initSeed ) =
-            Random.step (forestGenerator initSize) seed
+        initForest =
+            Forest.new burnRate growthRate edgeLength randomInt
     in
         { forest = initForest
         , running = True
-        , seed = initSeed
         , clock = 0
-        , size = initSize
-        , burnRate = initBurnRate
-        , growthRate = initGrowthRate
-        , speed = initSpeed
+        , speed = speed
         , lastDrawTime = 0
         , framerate = 0
         }
@@ -377,7 +144,7 @@ initModel seed =
 
 init : Flags -> ( Model, Cmd Msg )
 init flags =
-    ( initModel (Random.initialSeed flags.randomSeed), Cmd.none )
+    ( initModel flags.randomInt, Cmd.none )
 
 
 main : Program Flags Model Msg
