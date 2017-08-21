@@ -1,7 +1,7 @@
 module ForestFire exposing (..)
 
 import AnimationFrame exposing (..)
-import Forest exposing (Forest, new, step, svg)
+import Forest exposing (Forest, new, step, restart, svg)
 import Html exposing (..)
 import Html.Attributes as Attr exposing (class, id)
 import Html.Events exposing (onClick, on)
@@ -25,9 +25,11 @@ type alias Flags =
 
 type Msg
     = IncrementForest Time
-    | ToggleRunning
-      -- | Restart
+    | Restart
+    | SetBurnRate Int
+    | SetGrowthRate Int
     | SetSpeed Int
+    | ToggleRunning
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -52,6 +54,29 @@ update msg model =
                 else
                     ( model, Cmd.none )
 
+        Restart ->
+            ( { model | forest = Forest.restart model.forest }, Cmd.none )
+
+        SetBurnRate sliderVal ->
+            let
+                burnRate =
+                    (toFloat sliderVal) / 100000
+
+                forest =
+                    Forest.setBurnRate model.forest burnRate
+            in
+                ( { model | forest = forest }, Cmd.none )
+
+        SetGrowthRate sliderVal ->
+            let
+                growthRate =
+                    (toFloat sliderVal) / 1000
+
+                forest =
+                    Forest.setGrowthRate model.forest growthRate
+            in
+                ( { model | forest = forest }, Cmd.none )
+
         SetSpeed sliderVal ->
             let
                 newSpeed =
@@ -61,11 +86,6 @@ update msg model =
 
         ToggleRunning ->
             ( { model | running = (not model.running) }, Cmd.none )
-
-
-
--- Restart ->
--- ( initModel, Cmd.none )
 
 
 subscriptions : Model -> Sub Msg
@@ -78,10 +98,12 @@ view model =
     div [ class "content" ]
         [ h1 [] [ text ("Forest Fire (" ++ (toString model.clock) ++ ")") ]
         , div [ class "filters" ]
-            [ speedSlider model.speed model.framerate ]
+            [ speedSlider model.speed model.framerate
+            , rateSlider "GrowthRate" SetGrowthRate model.forest.growthRate
+            , rateSlider "Burnrate" SetBurnRate model.forest.burnRate
+            ]
         , toggleButton model
-
-        -- , button [ onClick Restart ] [ text "Restart" ]
+        , button [ onClick Restart ] [ text "Restart" ]
         , Forest.svg model.forest
         ]
 
@@ -101,14 +123,23 @@ toggleButton model =
 speedSlider : Int -> Float -> Html Msg
 speedSlider speed framerate =
     let
-        frameRate =
+        effectiveFramerate =
             1000 // speed
     in
         div [ class "filter-slider" ]
             [ label [ class "name" ] [ text "Framerate" ]
             , paperSlider [ Attr.max "95", onImmediateValueChange SetSpeed ] []
-            , label [ class "val" ] [ text ((toString frameRate) ++ "(" ++ (toString framerate) ++ ")") ]
+            , label [ class "val" ] [ text ((toString effectiveFramerate) ++ "(" ++ (toString framerate) ++ ")") ]
             ]
+
+
+rateSlider : String -> (Int -> Msg) -> Float -> Html Msg
+rateSlider name msg rate =
+    div [ class "filter-slider" ]
+        [ label [ class "name" ] [ text name ]
+        , paperSlider [ Attr.max "100", onImmediateValueChange msg ] []
+        , label [ class "val" ] [ text (toString rate) ]
+        ]
 
 
 
@@ -125,7 +156,7 @@ initModel randomInt =
             0.01
 
         edgeLength =
-            100
+            40
 
         speed =
             30

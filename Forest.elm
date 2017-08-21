@@ -1,4 +1,4 @@
-module Forest exposing (Forest, new, step, svg)
+module Forest exposing (Forest, new, step, restart, setBurnRate, setGrowthRate, svg)
 
 --, step)
 
@@ -27,6 +27,16 @@ type Tree
     = Living
     | Burning
     | Dead
+
+
+setBurnRate : Forest -> Float -> Forest
+setBurnRate forest burnRate =
+    { forest | burnRate = burnRate }
+
+
+setGrowthRate : Forest -> Float -> Forest
+setGrowthRate forest growthRate =
+    { forest | growthRate = growthRate }
 
 
 getNeighbors : Int -> Int -> List Int
@@ -136,6 +146,15 @@ new burnRate growthRate edgeLength randomInt =
         , seed = newSeed
         , trees = trees
         }
+
+
+restart : Forest -> Forest
+restart forest =
+    let
+        ( trees, newSeed ) =
+            Random.step (forestGenerator forest.edgeLength) forest.seed
+    in
+        { forest | seed = newSeed, trees = trees }
 
 
 forestGenerator : Int -> Generator Trees
